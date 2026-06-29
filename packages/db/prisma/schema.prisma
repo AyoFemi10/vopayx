@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  BUSINESS
+  ADMIN
+}
+
+enum KycStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum WalletCurrency {
+  NGN
+  USD
+  GBP
+  EUR
+  KES
+  GHS
+  ZAR
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+  FEE
+  REFUND
+  EXCHANGE
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVERSED
+  CANCELLED
+}
+
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum PaymentProvider {
+  FLUTTERWAVE
+  PAYSTACK
+  INTERNAL
+}
+
+// ─── Models ──────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  phone         String?   @unique
+  role          UserRole  @default(USER)
+  isVerified    Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  kycStatus     KycStatus @default(PENDING)
+  avatarUrl     String?
+  dateOfBirth   DateTime?
+  address       String?
+  country       String?   @default("NG")
+  pinHash       String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  wallets            Wallet[]
+  refreshTokens      RefreshToken[]
+  sentTransfers      Transfer[]          @relation("SenderTransfers")
+  receivedTransfers  Transfer[]          @relation("ReceiverTransfers")
+  beneficiaries      Beneficiary[]
+  kycDocuments       KycDocument[]
+  auditLogs          AuditLog[]
+  emailVerifications EmailVerification[]
+  passwordResets     PasswordReset[]
+  notifications      Notification[]
+
+  @@map("users")
+}
+
+model EmailVerification {
+  id        String    @id @default(cuid())
+  userId    String
+  otp       String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  deviceInfo String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Wallet {
+  id            String         @id @default(cuid())
+  userId        String
+  currency      WalletCurrency
+  balance       Decimal        @default(0) @db.Decimal(20, 6)
+  lockedBalance Decimal        @default(0) @db.Decimal(20, 6)
+  isActive      Boolean        @default(true)
+  isDefault     Boolean        @default(false)
+  accountNumber String?        @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions      Transaction[]
+  ledgerEntries     LedgerEntry[]
+  sentTransfers     Transfer[]    @relation("SenderWallet")
+  receivedTransfers Transfer[]    @relation("ReceiverWallet")
+
+  @@unique([userId, currency])
+  @@map("wallets")
+}
+
+model Transaction {
+  id          String            @id @default(cuid())
+  walletId    String
+  type        TransactionType
+  status      TransactionStatus @default(PENDING)
+  amount      Decimal           @db.Decimal(20, 6)
+  fee         Decimal           @default(0) @db.Decimal(20, 6)
+  currency    WalletCurrency
+  reference   String            @unique @default(cuid())
+  description String?
+  metadata    Json?
+  provider    PaymentProvider?
+  providerRef String?
+  ipAddress   String?
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  wallet        Wallet        @relation(fields: [walletId], references: [id])
+  ledgerEntries LedgerEntry[]
+  transfer      Transfer?
+
+  @@map("transactions")
+}
+
+model LedgerEntry {
+  id            String          @id @default(cuid())
+  transactionId String
+  walletId      String
+  direction     LedgerDirection
+  amount        Decimal         @db.Decimal(20, 6)
+  balanceBefore Decimal         @db.Decimal(20, 6)
+  balanceAfter  Decimal         @db.Decimal(20, 6)
+  description   String?
+  createdAt     DateTime        @default(now())
+
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+  wallet      Wallet      @relation(fields: [walletId], references: [id])
+
+  @@map("ledger_entries")
+}
+
+model Transfer {
+  id               String            @id @default(cuid())
+  transactionId    String            @unique
+  senderWalletId   String
+  receiverWalletId String
+  senderUserId     String
+  receiverUserId   String
+  amount           Decimal           @db.Decimal(20, 6)
+  fee              Decimal           @default(0) @db.Decimal(20, 6)
+  currency         WalletCurrency
+  status           TransactionStatus @default(PENDING)
+  note             String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  transaction    Transaction @relation(fields: [transactionId], references: [id])
+  senderWallet   Wallet      @relation("SenderWallet", fields: [senderWalletId], references: [id])
+  receiverWallet Wallet      @relation("ReceiverWallet", fields: [receiverWalletId], references: [id])
+  senderUser     User        @relation("SenderTransfers", fields: [senderUserId], references: [id])
+  receiverUser   User        @relation("ReceiverTransfers", fields: [receiverUserId], references: [id])
+
+  @@map("transfers")
+}
+
+model Beneficiary {
+  id            String         @id @default(cuid())
+  userId        String
+  name          String
+  email         String?
+  phone         String?
+  accountNumber String?
+  bankCode      String?
+  bankName      String?
+  currency      WalletCurrency @default(NGN)
+  isVopayUser   Boolean        @default(false)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("beneficiaries")
+}
+
+model KycDocument {
+  id          String    @id @default(cuid())
+  userId      String
+  type        String
+  number      String
+  frontUrl    String?
+  backUrl     String?
+  selfieUrl   String?
+  status      KycStatus @default(PENDING)
+  reviewNote  String?
+  submittedAt DateTime  @default(now())
+  reviewedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("kyc_documents")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  type      String
+  isRead    Boolean  @default(false)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}

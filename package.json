@@ -1,0 +1,22 @@
+{
+  "name": "vopay-x",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "npm run db:generate && turbo run build",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "turbo run db:migrate",
+    "db:push": "turbo run db:push",
+    "db:studio": "cd packages/db && npx prisma studio",
+    "lint": "turbo run lint",
+    "api:dev": "npm run dev --workspace=apps/api",
+    "web:dev": "npm run dev --workspace=apps/web"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
